@@ -1,0 +1,15 @@
+{
+  "name": "ddgai-llama-proxy",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "event-stream": "^4.0.1",
+    "express": "^4.21.2"
+  }
+}
