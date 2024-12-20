@@ -90,7 +90,7 @@ function createResponseObject(
       role: "assistant",
       content: content.trim(),
     },
-    done: true,
+    done: false,
     total_duration: Math.round(getTotalDuration(metrics) * 1000000),
     load_duration: Math.round(getLoadDuration(metrics) * 1000000),
     eval_count: metrics.evalCount,
