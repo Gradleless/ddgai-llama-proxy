@@ -130,7 +130,6 @@ async function processStream(
                   createResponseObject(metrics, json.message, false)
                 ) + "\n"
               );
-              console.log(json);
             }
           } catch (e) {
             console.error("Failed to parse JSON:", jsonString);
