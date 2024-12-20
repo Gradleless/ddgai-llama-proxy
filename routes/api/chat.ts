@@ -111,11 +111,7 @@ async function processStream(
       const { value, done } = await reader.read();
 
       if (done) {
-        res.write(
-          "" +
-            JSON.stringify(createResponseObject(metrics, "", true)) +
-            ""
-        );
+        res.write(JSON.stringify(createResponseObject(metrics, "", true)));
         res.end();
         break;
       }
@@ -130,25 +126,21 @@ async function processStream(
             const json = JSON.parse(jsonString);
             if (json.message) {
               res.write(
-                "" +
-                  JSON.stringify(
-                    createResponseObject(metrics, json.message, false)
-                  ) +
-                  "\n"
+                JSON.stringify(
+                  createResponseObject(metrics, json.message, false)
+                ) + "\n"
               );
-              console.log(json)
+              console.log(json);
             }
           } catch (e) {
-            console.error("Failed to parse JSON2:", jsonString);
+            console.error("Failed to parse JSON:", jsonString);
           }
         });
       }
     }
   } catch (error) {
     console.error("Stream processing error:", error);
-    res.write(
-      "data: " + JSON.stringify({ error: "Stream processing failed" }) + ""
-    );
+    res.write(JSON.stringify({ error: "Stream processing failed" }));
     res.end();
   }
 }
