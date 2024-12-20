@@ -1,19 +1,18 @@
 import { IncomingMessage, ServerResponse } from "http";
 import { sendChat } from "../../ddg_api/api";
-import type { ChatMessage } from "../../types/chat";
-
+import type { ChatMessage, PerformanceMetrics } from "../../types/chat";
+import {
+  addEvaluation,
+  getLoadDuration,
+  getTotalDuration,
+  createMetrics,
+} from "../../utils/metrics";
 let vqd: string | undefined;
 
 export default async (
   req: IncomingMessage,
   res: ServerResponse
 ): Promise<void> => {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-  });
-
   let body = "";
   req.on("data", (chunk: Buffer) => {
     body += chunk.toString();
@@ -21,9 +20,21 @@ export default async (
 
   req.on("end", async () => {
     try {
-      const parsed: { messages: ChatMessage[] } = JSON.parse(body);
+      const parsed: ChatMessage = JSON.parse(body);
 
-      // Validate and ensure messages are formatted correctly
+      if (!parsed.stream) {
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+        });
+      } else {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        });
+      }
+      const metrics = createMetrics();
+
       parsed.messages.forEach((msg) => {
         if (msg.role !== "user") msg.role = "user";
       });
@@ -34,20 +45,10 @@ export default async (
 
       if (!responses) return;
 
-      while (true) {
-        const { value, done } = await responses.read();
-        if (value) {
-          const text = new TextDecoder().decode(value);
-
-          // if text is empty, skip
-          if (!text.trim()) continue;
-          res.write(`data: ${text}\n`);
-        }
-        if (done) {
-          res.write("data: [DONE]\n");
-          res.end();
-          break;
-        }
+      if (parsed.stream === false) {
+        await processNonStream(responses, metrics, res);
+      } else {
+        await processStream(responses, metrics, res);
       }
     } catch (e) {
       console.error(e);
@@ -59,3 +60,133 @@ export default async (
     console.log("Connection closed");
   });
 };
+
+function createResponseObject(
+  metrics: PerformanceMetrics,
+  content: string,
+  isDone: boolean
+) {
+  const baseObj = {
+    model: "claude-3-haiku-20240307",
+    created_at: new Date().toISOString(),
+  };
+
+  if (isDone) {
+    return {
+      model: baseObj.model,
+      created_at: baseObj.created_at,
+      done: true,
+      total_duration: Math.round(getTotalDuration(metrics) * 1000000),
+      load_duration: Math.round(getLoadDuration(metrics) * 1000000),
+      eval_count: metrics.evalCount,
+      eval_duration: Math.round(metrics.evalDuration * 1000000),
+    };
+  }
+
+  return {
+    model: baseObj.model,
+    created_at: baseObj.created_at,
+    message: {
+      role: "assistant",
+      content: content.trim(),
+    },
+    done: true,
+    total_duration: Math.round(getTotalDuration(metrics) * 1000000),
+    load_duration: Math.round(getLoadDuration(metrics) * 1000000),
+    eval_count: metrics.evalCount,
+    eval_duration: Math.round(metrics.evalDuration * 1000000),
+  };
+}
+
+async function processStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  metrics: PerformanceMetrics,
+  res: ServerResponse
+): Promise<void> {
+  const decoder = new TextDecoder();
+
+  try {
+    while (true) {
+      const evalStartTime = performance.now();
+      const { value, done } = await reader.read();
+
+      if (done) {
+        res.write(
+          "data: " +
+            JSON.stringify(createResponseObject(metrics, "", true)) +
+            "\n\n"
+        );
+        res.end();
+        break;
+      }
+
+      if (value) {
+        const text = decoder.decode(value);
+        addEvaluation(metrics, performance.now() - evalStartTime);
+        const jsonStrings = text.match(/\{[^}]+\}/g) || [];
+
+        jsonStrings.forEach((jsonString) => {
+          try {
+            const json = JSON.parse(jsonString);
+            if (json.message) {
+              res.write(
+                "data: " +
+                  JSON.stringify(
+                    createResponseObject(metrics, json.message, false)
+                  ) +
+                  "\n\n"
+              );
+            }
+          } catch (e) {
+            console.error("Failed to parse JSON:", jsonString);
+          }
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Stream processing error:", error);
+    res.write(
+      "data: " + JSON.stringify({ error: "Stream processing failed" }) + "\n\n"
+    );
+    res.end();
+  }
+}
+
+async function processNonStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  metrics: PerformanceMetrics,
+  res: ServerResponse
+) {
+  let fullResponse = "";
+  while (true) {
+    const evalStartTime = performance.now();
+    const { value, done } = await reader.read();
+
+    if (value) {
+      const text = new TextDecoder().decode(value);
+      const jsonStrings = text.match(/\{[^}]+\}/g) || [];
+
+      addEvaluation(metrics, performance.now() - evalStartTime);
+
+      jsonStrings.forEach((jsonString) => {
+        try {
+          const json = JSON.parse(jsonString);
+
+          if (json.message) {
+            fullResponse += json.message;
+          }
+        } catch (e) {
+          console.error("Failed to parse JSON:", jsonString);
+        }
+      });
+    }
+
+    if (done) {
+      const responseObj = createResponseObject(metrics, fullResponse, false);
+
+      res.write(JSON.stringify(responseObj));
+      res.end();
+      break;
+    }
+  }
+}
