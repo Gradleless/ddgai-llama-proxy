@@ -28,7 +28,7 @@ export default async (
         });
       } else {
         res.writeHead(200, {
-          "Content-Type": "text/event-stream",
+          "Content-Type": "application/x-ndjson",
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
         });
@@ -112,9 +112,9 @@ async function processStream(
 
       if (done) {
         res.write(
-          "data: " +
+          "" +
             JSON.stringify(createResponseObject(metrics, "", true)) +
-            "\n\n"
+            ""
         );
         res.end();
         break;
@@ -130,15 +130,16 @@ async function processStream(
             const json = JSON.parse(jsonString);
             if (json.message) {
               res.write(
-                "data: " +
+                "" +
                   JSON.stringify(
                     createResponseObject(metrics, json.message, false)
                   ) +
-                  "\n\n"
+                  "\n"
               );
+              console.log(json)
             }
           } catch (e) {
-            console.error("Failed to parse JSON:", jsonString);
+            console.error("Failed to parse JSON2:", jsonString);
           }
         });
       }
@@ -146,7 +147,7 @@ async function processStream(
   } catch (error) {
     console.error("Stream processing error:", error);
     res.write(
-      "data: " + JSON.stringify({ error: "Stream processing failed" }) + "\n\n"
+      "data: " + JSON.stringify({ error: "Stream processing failed" }) + ""
     );
     res.end();
   }
